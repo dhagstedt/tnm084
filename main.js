@@ -1,5 +1,8 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
 import {OrbitControls} from 'https://cdn.skypack.dev/pin/three@v0.134.0-mlfrkS6HEbKKwwCDDo6H/mode=imports/unoptimized/examples/jsm/controls/OrbitControls.js'
+import {EffectComposer} from 'https://cdn.skypack.dev/pin/three@v0.134.0-mlfrkS6HEbKKwwCDDo6H/mode=imports/unoptimized/examples/jsm/postprocessing/EffectComposer.js'
+import {RenderPass} from 'https://cdn.skypack.dev/pin/three@v0.134.0-mlfrkS6HEbKKwwCDDo6H/mode=imports/unoptimized/examples/jsm/postprocessing/RenderPass.js'
+import {UnrealBloomPass} from 'https://cdn.skypack.dev/pin/three@v0.134.0-mlfrkS6HEbKKwwCDDo6H/mode=imports/unoptimized/examples/jsm/postprocessing/UnrealBloomPass.js'
 import * as dat from 'dat.gui';
 
 const gui = new dat.GUI()
@@ -8,14 +11,34 @@ const world = {
     width: 10,
     height: 2,
     widthSegments: 40,
-    heightSegments: 8
+    heightSegments: 8,
+    emmisiveG: 20, 
+    
+  },
+  waveVariables: {
+    sinConstant: 0.1,
+    cosConstant: 0.1,
+    amplitude:1,
+    
+  },
+  bloomVariables:
+  {
+    threshold: 0.1,
+    radius : 0.0,
+    strength: 1.0,
+
   }
 }
 gui.add(world.plane, 'width', 1, 20).onChange(generatePlane)
-
 gui.add(world.plane, 'height', 1, 5).onChange(generatePlane)
 gui.add(world.plane, 'widthSegments', 1, 100).onChange(generatePlane)
 gui.add(world.plane, 'heightSegments', 1, 100).onChange(generatePlane)
+gui.add(world.waveVariables, 'sinConstant', 0.0, 0.5)
+gui.add(world.waveVariables, 'cosConstant', 0.0, 0.5)
+gui.add(world.waveVariables, 'amplitude', 0.0, 3.0)
+gui.add(world.bloomVariables, 'strength', 0.0, 5).onChange(bloom)
+gui.add(world.bloomVariables, 'threshold', 0.0, 1.0).onChange(bloom)
+gui.add(world.bloomVariables, 'radius', 0.0, 1.0).onChange(bloom)
 
 function generatePlane() {
   planemesh.geometry.dispose()
@@ -23,7 +46,7 @@ function generatePlane() {
     world.plane.width,
     world.plane.height,
     world.plane.widthSegments,
-    world.plane.heightSegments
+    world.plane.heightSegments,
   )
   // vertice position randomization
   const { array } = planemesh.geometry.attributes.position
@@ -40,16 +63,17 @@ function generatePlane() {
     }
 
     randomValues.push(Math.random())
+
   }
 
   planemesh.geometry.attributes.position.randomValues = randomValues
   planemesh.geometry.attributes.position.originalpos = planemesh.geometry.attributes.position.array
 }
 const scene = new THREE.Scene();
-const color = new THREE.Color("rgb(7, 50, 52)");
+const color = new THREE.Color("rgb(10, 10, 52)");
 scene.background = color;
 
-const renderer = new THREE.WebGLRenderer({antialias: true});
+const renderer = new THREE.WebGLRenderer();
 //FOV, aspect ratio, clipping planes (near/far) 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 new OrbitControls(camera, renderer.domElement)
@@ -62,11 +86,14 @@ renderer.setPixelRatio(devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
 // Add light 
-const light1 = new THREE.DirectionalLight(0x590080, 100);
+const light1 = new THREE.DirectionalLight(0x590080, 10, );
 light1.position.set(0,10,0);
 scene.add(light1);
 
-const light2 = new THREE.DirectionalLight(0x590080, 100);
+const helper = new THREE.DirectionalLightHelper( light1, 5 );
+scene.add( helper );
+
+const light2 = new THREE.DirectionalLight(0x590080, 1);
 light2.position.set(0,-10,0);
 scene.add(light2);
 
@@ -83,6 +110,7 @@ scene.add(light4);
 // const light2 = new THREE.HemisphereLight(skyColor, groundColor, 0.3);
 // scene.add(light2);
 
+
 //Create plane
 const plane = new THREE.PlaneBufferGeometry(  
   world.plane.width,
@@ -90,16 +118,24 @@ const plane = new THREE.PlaneBufferGeometry(
   world.plane.widthSegments,
   world.plane.heightSegments);
 
-const planematerial = new THREE.MeshPhongMaterial({color:0x00FF00, side: THREE.DoubleSide, flatShading: THREE.FlatShading,opacity: 1, transparent: true});
+const emissiveColor = new THREE.Color("rgb(0, 0, 0)");
+
+const planematerial = new THREE.MeshPhongMaterial({color:0x00ff00, side: THREE.DoubleSide, flatShading: THREE.FlatShading,opacity: 0.7, transparent: true, emissive: emissiveColor, });
 const planemesh = new THREE.Mesh(plane, planematerial);
 scene.add(planemesh)
 
-const planematerial2 = new THREE.MeshPhongMaterial({color:0x00FF00, side: THREE.DoubleSide, flatShading: THREE.FlatShading,opacity: 1, transparent: true});
-const planemesh2 = new THREE.Mesh(plane, planematerial2);
-scene.add(planemesh2)
-generatePlane()
+const composer = new EffectComposer(renderer)
+composer.addPass(new RenderPass(scene, camera))
+composer.addPass(new UnrealBloomPass({x:1024, y:1024}, world.bloomVariables.strength, 0.0, world.bloomVariables.threshold))
+function bloom(){
+composer.passes[1].strength = world.bloomVariables.strength
+composer.passes[1].threshold = world.bloomVariables.threshold
+composer.passes[1].radius = world.bloomVariables.radius
+console.log(composer.passes[1])
+}
 
 generatePlane()
+bloom()
 
 let frame = 0;
 function animate(){
@@ -108,41 +144,35 @@ function animate(){
   const now = Date.now() / 300;
   const {array, originalpos, randomValues} = planemesh.geometry.attributes.position
   for (let i = 0; i < array.length; i++) {
+
       if(i % 3 === 0){
       array[i] = originalpos[i] + Math.cos(10*(frame + randomValues[i]))*0.003
+      //testa lägga till originalpos2
       array[i+1] = originalpos[i+1] + Math.sin(frame + randomValues[i+1])*0.001
+        if( i < world.plane.widthSegments*3){
+          array[i+1] =  1+Math.sin((frame+randomValues[i+1])*2)*0.3
+        }
       }
       const x = plane.attributes.position.getX(i);
       const y = plane.attributes.position.getY(i);
       // SINE WAVE
-      const xangle = x + now*0.8
-      const yangle = y + now*0.3
+      const xangle = x + now*world.waveVariables.sinConstant
+      const yangle = y + now*world.waveVariables.cosConstant
       const xsin = Math.sin(xangle)
       const ycos = Math.cos(yangle)
-
-      planemesh.geometry.attributes.position.setZ(i, (xsin+ycos)/2);
+      
+      //denna sabbar heightsegments
+      planemesh.geometry.attributes.position.setZ(i, (world.waveVariables.amplitude*xsin+ycos));
 
       //array[i+2] = originalpos[i+2] + Math.sin(frame + randomValues[i+2])*0.005
 
 
   }
-  // for (let i = 0; i < count; i++) {
-  //     const x = plane.attributes.position.getX(i);
-  //     const y = plane.attributes.position.getY(i);
-  //     // SINE WAVE
-  //     const xangle = x + now/5
-  //     const xsin = Math.sin(xangle)
-  //     const xcos = Math.cos(xangle)
-
-  //     plane.attributes.position.setZ(i, xsin*xcos/5);
-
-  //     //plane.attributes.position.setX(i, xsin*xcos/5);
-  // }
-  //plane.computeVertexNormals();
+  plane.computeVertexNormals();
   planemesh.geometry.attributes.position.needsUpdate = true
 
   requestAnimationFrame(animate);
-  renderer.render(scene, camera);
+  composer.render();
 }
 
 
